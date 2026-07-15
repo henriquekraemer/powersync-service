@@ -465,12 +465,12 @@ export class PostgresBucketBatch
         }
         const { flushedAny } = await persistedBatch.flush(db);
         clearedError = flushedAny && !this.clearedError;
-        if (clearedError) {
-          // No need to clear an error more than once per batch, since an error would always result in restarting the batch.
-          await this.clearError(db);
-        }
       });
       if (clearedError) {
+        // No need to clear an error more than once per batch, since an error would always result in restarting the batch.
+        // Cleared outside the replication transaction to avoid serialization conflicts
+        // on the sync_rules row with concurrent keepalive updates from other writers.
+        await this.clearError();
         this.clearedError = true;
       }
     }
@@ -537,6 +537,10 @@ export class PostgresBucketBatch
     });
 
     if (clearedError) {
+      // Clear the error outside the replication transaction (plain autocommit update,
+      // like the keepalive), to avoid serialization conflicts on the sync_rules row
+      // when multiple writers flush concurrently.
+      await this.clearError();
       this.clearedError = true;
     }
 
@@ -1053,10 +1057,11 @@ export class PostgresBucketBatch
         `write ${Math.round(writeTime)}ms`
     );
 
+    // Note: the actual clearError() call happens outside the replication transaction
+    // (see flushInner). Doing it inside the REPEATABLE READ transaction conflicts with
+    // concurrent keepalive updates on the same sync_rules row, causing serialization
+    // failures that retry the entire flush when multiple writers are active.
     const clearedError = didFlush && !this.clearedError;
-    if (clearedError) {
-      await this.clearError(db);
-    }
 
     // Don't return empty batches
     return {
