@@ -954,6 +954,11 @@ export class PostgresBucketBatch
     // If set, we need to start a new transaction with this batch.
     let resumeBatch: OperationBatch | null = null;
     let didFlush = false;
+    const timingStart = performance.now();
+    let lookupTime = 0;
+    let evalBuildTime = 0;
+    let writeTime = 0;
+    let opCount = 0;
 
     // Now batch according to the sizes
     // This is a single batch if storeCurrentData == false
@@ -973,6 +978,7 @@ export class PostgresBucketBatch
         };
       });
 
+      const lookupStart = performance.now();
       const current_data_lookup = new Map<string, V3CurrentDataDecoded>();
       for await (const currentDataRows of this.currentDataStore.streamLookupRows(db, {
         groupId: this.group_id,
@@ -987,6 +993,7 @@ export class PostgresBucketBatch
           );
         }
       }
+      lookupTime += performance.now() - lookupStart;
 
       let persistedBatch: PostgresPersistedBatch | null = new PostgresPersistedBatch({
         group_id: this.group_id,
@@ -1006,7 +1013,10 @@ export class PostgresBucketBatch
           // If it will be used again later, it will be set again using nextData below
           current_data_lookup.delete(op.internalBeforeKey);
         }
+        const saveStart = performance.now();
         const nextData = await this.saveOperation(persistedBatch!, op, currentData);
+        evalBuildTime += performance.now() - saveStart;
+        opCount += 1;
         if (nextData != null) {
           // Update our current_data and size cache
           current_data_lookup.set(op.internalAfterKey!, nextData);
@@ -1014,7 +1024,9 @@ export class PostgresBucketBatch
         }
 
         if (persistedBatch!.shouldFlushTransaction()) {
+          const writeStart = performance.now();
           const { flushedAny } = await persistedBatch!.flush(db);
+          writeTime += performance.now() - writeStart;
           didFlush ||= flushedAny;
           // The operations stored in this batch will be processed in the `resumeBatch`
           persistedBatch = null;
@@ -1028,10 +1040,18 @@ export class PostgresBucketBatch
          * The operations were less than the max size if here. Flush now.
          * `persistedBatch` will be `null` if the operations should be flushed in a new transaction.
          */
+        const writeStart = performance.now();
         const { flushedAny } = await persistedBatch.flush(db);
+        writeTime += performance.now() - writeStart;
         didFlush ||= flushedAny;
       }
     }
+
+    this.logger.info(
+      `[storage-timing] flush ${opCount} ops: total ${Math.round(performance.now() - timingStart)}ms | ` +
+        `current_data lookup ${Math.round(lookupTime)}ms | eval+build ${Math.round(evalBuildTime)}ms | ` +
+        `write ${Math.round(writeTime)}ms`
+    );
 
     const clearedError = didFlush && !this.clearedError;
     if (clearedError) {
