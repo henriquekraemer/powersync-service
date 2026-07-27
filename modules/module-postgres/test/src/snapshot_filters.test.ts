@@ -45,6 +45,41 @@ bucket_definitions:
     expect(reduced.length).toEqual(150);
   });
 
+  test('filter combined with parallel snapshot workers', async () => {
+    await using context = await WalStreamTestContext.open(factory, {
+      storageVersion,
+      walStreamOptions: { snapshotConcurrency: 2, snapshotChunkLength: 100 }
+    });
+
+    await context.updateSyncRules(`
+initial_snapshot_filters:
+  test_a:
+    sql: "id > 250"
+  test_b:
+    sql: "id <= 50"
+
+bucket_definitions:
+  global:
+    data:
+      - SELECT id FROM test_a WHERE id > 250
+      - SELECT id FROM test_b WHERE id <= 50`);
+    const { pool } = context;
+
+    await pool.query(`CREATE TABLE test_a(id int4 primary key)`);
+    await pool.query(`CREATE TABLE test_b(id int4 primary key)`);
+    await pool.query(`INSERT INTO test_a SELECT i FROM generate_series(1, 500) i`);
+    await pool.query(`INSERT INTO test_b SELECT i FROM generate_series(1, 400) i`);
+
+    await context.replicateSnapshot();
+
+    const data = await context.getBucketData('global[]', undefined, {});
+    const reduced = reduceBucket(data);
+    const countA = reduced.filter((row) => row.object_type == 'test_a').length;
+    const countB = reduced.filter((row) => row.object_type == 'test_b').length;
+    expect(countA).toEqual(250);
+    expect(countB).toEqual(50);
+  });
+
   test('filter with a plain table name matches the table in any schema', async () => {
     await using context = await WalStreamTestContext.open(factory, { storageVersion });
 
