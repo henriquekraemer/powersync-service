@@ -224,6 +224,7 @@ export class PostgresBucketBatch
         objectId,
         replicaIdColumns,
         snapshotComplete: sourceTableRow!.snapshot_done ?? true,
+        initialSnapshotFilter: syncRules.getInitialSnapshotFilter(source),
         ...syncRules.getMatchingSources(source)
       });
       if (!sourceTable.snapshotComplete) {
@@ -337,6 +338,7 @@ export class PostgresBucketBatch
           (c) => ({ name: c.name, typeId: c.typeId, type: c.type }) satisfies ColumnDescriptor
         ) ?? [],
       snapshotComplete: row.snapshot_done ?? true,
+      initialSnapshotFilter: syncRules.getInitialSnapshotFilter(ref),
       ...syncRules.getMatchingSources(ref)
     });
 

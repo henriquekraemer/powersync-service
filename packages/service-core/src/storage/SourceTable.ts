@@ -2,6 +2,7 @@ import {
   BucketDataSource,
   BucketDefinitionId,
   DEFAULT_TAG,
+  InitialSnapshotFilter,
   ParameterIndexId,
   ParameterIndexLookupCreator,
   SourceTableRef
@@ -25,6 +26,12 @@ export interface SourceTableOptions {
   parameterLookupSources: ParameterIndexLookupCreator[];
   bucketDataSourceIds?: Set<BucketDefinitionId>;
   parameterLookupSourceIds?: Set<ParameterIndexId>;
+  /**
+   * Optional filter applied to this table during the initial snapshot.
+   *
+   * Resolved from the sync config's global `initial_snapshot_filters`.
+   */
+  initialSnapshotFilter?: InitialSnapshotFilter;
 }
 
 export interface TableSnapshotStatus {
@@ -136,6 +143,10 @@ export class SourceTable {
     return this.options.parameterLookupSourceIds;
   }
 
+  get initialSnapshotFilter() {
+    return this.options.initialSnapshotFilter;
+  }
+
   /**
    * Sanitized name of the entity in the format of "{schema}.{entity name}".
    * Suitable for safe use in Postgres queries.
@@ -162,7 +173,8 @@ export class SourceTable {
       parameterLookupSources: this.parameterLookupSources,
       bucketDataSourceIds: this.bucketDataSourceIds == null ? undefined : new Set(this.bucketDataSourceIds),
       parameterLookupSourceIds:
-        this.parameterLookupSourceIds == null ? undefined : new Set(this.parameterLookupSourceIds)
+        this.parameterLookupSourceIds == null ? undefined : new Set(this.parameterLookupSourceIds),
+      initialSnapshotFilter: this.initialSnapshotFilter
     });
     copy.syncData = this.syncData;
     copy.syncParameters = this.syncParameters;
